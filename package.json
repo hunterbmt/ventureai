@@ -13,7 +13,10 @@
     "langchain": "^0.0.189",
     "lodash": "^4.17.21",
     "next": "^13.1.1",
-    "openai": "^4.16.1"
+    "openai": "^4.16.1",
+    "p-queue": "^8.0.1",
+    "play-sound": "^1.1.6",
+    "sound-play": "^1.1.0"
   },
   "engines": {
     "node": ">=16"

@@ -7,7 +7,33 @@ import { LLMChain } from "langchain/chains";
 import { OpenAI } from "langchain/llms/openai";
 import { PromptTemplate } from "langchain/prompts";
 
+import fs from "fs";
+import path from "path";
+import OpenAIAPI from "openai";
+import player from "sound-play";
 
+import PQueue from 'p-queue';
+
+const queue = new PQueue({concurrency: 1});
+
+const openai = new OpenAIAPI();
+
+let speechId = 0;
+const genSpeech = async (text, member, roundNumber) => {
+    speechId = speechId + 1;
+    const speechFile = path.resolve(`./${speechId}-${roundNumber}-${member.name}.mp3`);
+    const mp3 = await openai.audio.speech.create({
+        model: "tts-1",
+        voice: member.voice,
+        input: "Mình là con Nhu bò. Mình có cái bụng rất béo.",
+      });
+      const buffer = Buffer.from(await mp3.arrayBuffer());
+      await fs.promises.writeFile(speechFile, buffer);
+      queue.add(() => {
+        console.log(speechFile);
+        return player.play(speechFile);
+      });
+}
 const model = new OpenAI({
     modelName: process.env.AGENT_MODEL,
     temperature: 0,
@@ -22,6 +48,7 @@ const objective = process.env.OBJECTIVE;
 const teamPrompt = `
 - David:
 David is an innovation expert, who know the best how to faciliate the meeting.
+
 - Sumira:
 Sumira is particularly knowledgable about the state-of-the-art in everything and can quickly tell if something is possible, impossible or novel.
 Sumira is a bit of the pain in the ass on these things, but she helps to push the boundaries of engineering, and so people like talking to her, even though she has forceful opinions.
@@ -33,10 +60,12 @@ She is extremely well-read in the scientific literature and loves to dig out cas
 She makes connections between differents fields effortly. She typically rambles on with 3 or so examples at a time, giving her "lessons learned" speech.
 
 - YC:
-Steve always tries to push the envelope and think about the future. He is extremely smart and a well-respected futurist.
+YC is Head of Product.
+YC always tries to push the envelope and think about the future. He is extremely smart and a well-respected futurist.
 
 - Son:
-Tauhid is absolutely relentless in figuring out how to build stuff, right to the last detail. He will drill down into your brain until he has figured it all out. Very hard to please!
+Son is Head of Engineering.
+Son is absolutely relentless in figuring out how to build stuff, right to the last detail. He will drill down into your brain until he has figured it all out. Very hard to please!
 `
 const postFix = `
 Further details to remember:
@@ -136,6 +165,7 @@ const sumiraPrompt = PromptTemplate.fromTemplate(`
 You are Sumira, a professor who is particularly knowledgable about the state-of-the-art in everything and can quickly tell if something is possible, impossible or novel.
 You helps to challenge and push the boundaries of engineering. You has forceful opinions and don't afaraid to challenge other's opinions.
 You NEVER agrees with anyone.
+A lot of people want to talk, so keep it short.
 
 Here is your team:
 ${teamPrompt}
@@ -164,6 +194,7 @@ You typically rambles on with 3 or so examples at a time, giving your "lessons l
 
 Remember, you only probide the real case studies, don't use make up one.
 If you don't have any related real case studies, try to connect the discussion with concepts from other's fields
+A lot of people want to talk, so keep it short.
 
 Here is your team:
 ${teamPrompt}
@@ -179,8 +210,9 @@ ${postFix}
 const sueChain = new LLMChain({ llm: agentModel, prompt: suePrompt });
 
 const ycPrompt = PromptTemplate.fromTemplate(`
-You are YC, a succesful enterupreneur who always tries to push the envelope and think about the future.
+You are YC, a succesful enterupreneurs and head of product who always tries to push the envelope and think about the future.
 You are extremely smart and a well-respected futurist.
+A lot of people want to talk, so keep it short.
 
 
 Here is your team:
@@ -197,8 +229,10 @@ ${postFix}
 const ycChain = new LLMChain({ llm: agentModel, prompt: ycPrompt });
 
 const sonPrompt = PromptTemplate.fromTemplate(`
-You are Son, an talented tech founder, who are absolutely relentless in figuring out how to build stuff, right to the last detail.
-You will drill down into your brain until he has figured it all out. Very hard to please!
+You are Son, an talented tech guru and head of engineering, who are absolutely relentless in figuring out how to build stuff, right to the last detail.
+You will drill down into your brain until you have figured it all out. Very hard to please!
+You have deep knowledge on newest technologies and what value it can bring on the table as well as its limitation.
+A lot of people want to talk, so keep it short.
 
 Here is your team:
 ${teamPrompt}
@@ -222,27 +256,32 @@ const team = {
     "David": {
         name: 'David',
         llm: facilitatorChain,
-        color: chalk.whiteBright
+        color: chalk.whiteBright,
+        voice: 'alloy',
     },
     "Sumira": {
         name: 'Sumira',
         llm: sumiraChain,
-        color: chalk.cyan
+        color: chalk.cyan,
+        voice: 'echo',
     },
     "Su-E": {
         name: 'Su-E',
         llm: sueChain,
-        color: chalk.magenta
+        color: chalk.magenta,
+        voice: 'fable',
     },
     "YC": {
         name: 'YC',
         llm: ycChain,
-        color: chalk.green
+        color: chalk.green,
+        voice: 'onyx',
     },
     "Son": {
         name: 'Son',
         llm: sonChain,
-        color: chalk.red
+        color: chalk.red,
+        voice: 'nova',
     }
 }
 
@@ -250,7 +289,7 @@ const normalFlow = [team['Su-E'], team.Sumira, team.YC, team.Son];
 let last_lines = "";
 
 
-const getResponse = async (member, new_lines) => {
+const getResponse = async (member, new_lines , numberOfRound) => {
     const { text } = await member.llm.call({
         parking_lot: PARKING_LOT,
         chat_history: SUMMARY,
@@ -261,6 +300,7 @@ const getResponse = async (member, new_lines) => {
     if (text.includes("Response:")) {
         let parts = text.split("Response:");
         const result = parts[parts.length - 1].trim();
+        // await genSpeech(result, member, numberOfRound);
         const response = `\n${member.name}: ${result}`;
         console.log(member.color(response));
         if (result.includes(`**Meeting Minutes Summary:**`)) {
@@ -272,7 +312,7 @@ const getResponse = async (member, new_lines) => {
         }
         return {
             response,
-            target: _.sampleSize(normalFlow, 3)
+            target: _.sampleSize(normalFlow, 4)
         }
     } else {
         return ({
@@ -308,7 +348,7 @@ const logNameCount = (response) => {
         nameCount['Su-E'] = nameCount['Su-E'] - 2;
     }
     if (response.includes("**Son**")) {
-        nameCount.Sumira = nameCount.Sumira + 1;
+        nameCount.Son = nameCount.Son + 1;
     }
     if (response.includes("\nSon:")) {
         nameCount['Son'] = nameCount['Son'] - 2;
@@ -323,35 +363,37 @@ const logNameCount = (response) => {
 }
 
 while (true) {
-    let this_round_conversation = last_lines ? "Continue" : "Morning";
-    numberOfRound = numberOfRound + 1;
-    console.log('\x1b[33m', 'Round ', numberOfRound, '\x1b[0m')
-    const response = await getResponse(team.David, this_round_conversation);
-    logNameCount(response.response);
-    this_round_conversation = addToHistory(this_round_conversation, response.response)
-    await sleep(2000);
-    for (const member of response.target) {
-        let res = await getResponse(member, this_round_conversation);
-        this_round_conversation = addToHistory(this_round_conversation, res.response)
-        logNameCount(res.response);
+    if (numberOfRound < 5) {
+        let this_round_conversation = last_lines ? "Continue" : "Morning";
+        numberOfRound = numberOfRound + 1;
+        console.log('\x1b[33m', 'Round ', numberOfRound, '\x1b[0m')
+        const response = await getResponse(team.David, this_round_conversation, numberOfRound);
+        logNameCount(response.response);
+        this_round_conversation = addToHistory(this_round_conversation, response.response)
         await sleep(2000);
-    }
-    for (const member in nameCount) {
-        if (nameCount[member] > 2) {
-            if (response.target[response.target.length - 1].name !== member) {
-                let res = await getResponse(team[member], this_round_conversation);
-                this_round_conversation = addToHistory(this_round_conversation, res.response)
-            }
-            nameCount[member] = 0
+        for (const member of response.target) {
+            let res = await getResponse(member, this_round_conversation, numberOfRound);
+            this_round_conversation = addToHistory(this_round_conversation, res.response)
+            logNameCount(res.response);
+            await sleep(2000);
         }
+        for (const member in nameCount) {
+            if (nameCount[member] > 2) {
+                if (response.target[response.target.length - 1].name !== member) {
+                    let res = await getResponse(team[member], this_round_conversation, numberOfRound);
+                    this_round_conversation = addToHistory(this_round_conversation, res.response)
+                }
+                nameCount[member] = 0
+            }
+            await sleep(2000);
+        }
+        const memoryReponse = await memoryChain.call({
+            summary: SUMMARY,
+            new_lines: this_round_conversation
+        })
+    
+        SUMMARY = memoryReponse.text;
+        last_lines = this_round_conversation;
         await sleep(2000);
     }
-    const memoryReponse = await memoryChain.call({
-        summary: SUMMARY,
-        new_lines: this_round_conversation
-    })
-
-    SUMMARY = memoryReponse.text;
-    last_lines = this_round_conversation;
-    await sleep(2000);
 }
